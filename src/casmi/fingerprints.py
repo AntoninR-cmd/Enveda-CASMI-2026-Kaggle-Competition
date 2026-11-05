@@ -13,10 +13,8 @@ from rdkit import Chem, RDLogger
 from rdkit.Chem import rdFingerprintGenerator
 
 from casmi.catalog import N_JOBS, PROCESSED_DIR, load_catalog, map_chunks
+from casmi.config import FP_RADIUS, FP_SIZE  # rayon 2 (≈ ECFP4), 2048 bits, binaire
 
-# Paramètres de référence, à reporter dans config.py (A) : rayon 2 (≈ ECFP4), 2048 bits, binaire
-FP_RADIUS = 2
-FP_SIZE = 2048
 CATALOG_FP_PATH = PROCESSED_DIR / "catalog_fp.npy"
 
 _generator = None

@@ -19,7 +19,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from casmi.fingerprints import FP_SIZE
+from casmi.config import FP_SIZE
 
 
 class SpectrumToFingerprint(nn.Module):

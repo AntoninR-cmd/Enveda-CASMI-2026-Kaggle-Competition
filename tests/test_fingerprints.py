@@ -5,7 +5,8 @@ from rdkit import Chem, DataStructs
 from rdkit.Chem import rdFingerprintGenerator
 
 from casmi.catalog import build_catalog
-from casmi.fingerprints import FP_SIZE, build_catalog_fps, compute_fps, load_catalog_fps, smiles_to_fp
+from casmi.config import FP_RADIUS, FP_SIZE
+from casmi.fingerprints import build_catalog_fps, compute_fps, load_catalog_fps, smiles_to_fp
 
 CAFFEINE = "Cn1cnc2c1c(=O)n(C)c(=O)n2C"
 THEOBROMINE = "Cn1cnc2c1c(=O)[nH]c(=O)n2C"
@@ -22,7 +23,7 @@ def test_smiles_to_fp_shape_and_values():
 
 def test_smiles_to_fp_matches_rdkit_bitvect():
     # Même résultat que le fingerprint RDKit classique, et même Tanimoto
-    generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=FP_SIZE)
+    generator = rdFingerprintGenerator.GetMorganGenerator(radius=FP_RADIUS, fpSize=FP_SIZE)
     bitvect = generator.GetFingerprint(Chem.MolFromSmiles(CAFFEINE))
     assert np.flatnonzero(smiles_to_fp(CAFFEINE)).tolist() == list(bitvect.GetOnBits())
 

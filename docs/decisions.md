@@ -101,7 +101,7 @@ Détails : `notebooks/A/04_nettoyage.ipynb`.
 
 ### Fingerprints de référence : Morgan, rayon 2, 2048 bits, binaire — proposée par B
 
-- Paramètres `FP_RADIUS = 2` et `FP_SIZE = 2048` dans `src/casmi/fingerprints.py`, à reporter dans `config.py`.
+- Paramètres `FP_RADIUS = 2` et `FP_SIZE = 2048`, définis dans `src/casmi/config.py` et importés par `fingerprints.py` et `models/mlp.py`.
 - `catalog_fp.npy` : matrice `(275 810, 2048)` en `uint8`, ligne `i` = `cat_idx` `i`. Elle pèse 565 Mo et reste hors git, dans le même dossier que `catalog.parquet`. `load_catalog_fps(mmap=True)` évite de la charger entièrement en mémoire.
 - Une molécule a en moyenne 46 bits à 1 (2,25 %) : il faudra suivre le Tanimoto, la précision et le rappel des bits, pas l'exactitude.
 

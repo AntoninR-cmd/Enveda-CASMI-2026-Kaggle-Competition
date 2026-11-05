@@ -1,9 +1,13 @@
 """MLP spectre → fingerprint (étape 3 du pipeline).
 
-Squelette du sprint 2 : l'architecture de départ du plan, une boucle d'entraînement
-avec early stopping, la prédiction, les métriques et la sauvegarde. Il s'entraîne sur
-des tableaux X (entrées) et Y (fingerprints 0/1) quelconques ; le branchement sur les
-vraies entrées (spectres binnés et métadonnées de A) se fera au sprint 3.
+L'architecture de départ du plan, une boucle d'entraînement avec early stopping, la
+prédiction, les métriques et la sauvegarde. Les entrées X sont celles de A
+(load_matrices) : [spectre biné | features de métadonnées], en matrice creuse scipy
+ou en tableau numpy ; les lignes sont converties en dense par batch seulement.
+Les cibles Y sont les fingerprints 0/1 du catalogue.
+
+predict_fp(query_spectra) prédit le fingerprint de spectres bruts (pics et
+métadonnées), avec le modèle enregistré dans MODEL_PATH.
 
 Démonstration sur des données aléatoires :
     python -m casmi.models.mlp
@@ -16,10 +20,14 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
+import scipy.sparse as sp
 import torch
 from torch import nn
 
+from casmi.catalog import PROCESSED_DIR
 from casmi.config import FP_SIZE
+
+MODEL_PATH = PROCESSED_DIR / "models" / "mlp.pt"  # hors git
 
 
 class SpectrumToFingerprint(nn.Module):
@@ -42,43 +50,69 @@ class TrainConfig:
     hidden: int = 2048
     dropout: float = 0.2
     lr: float = 1e-3
-    batch_size: int = 256
+    batch_size: int = 1024  # sur CPU, 1 024 est environ 1,5 fois plus rapide par époque que 256
     max_epochs: int = 50
     patience: int = 5  # early stopping : époques sans amélioration de la loss de validation
     pos_weight: float | None = None  # poids des bits à 1 dans la loss (déséquilibre des classes)
     seed: int = 0
     n_threads: int = os.cpu_count() or 1
+    train_monitor_size: int = 20_000  # spectres d'entraînement sur lesquels la loss est suivie à chaque époque
+    adduct_encoding: str = "onehot"  # encodage de l'adduct des entrées (A) ; sert à predict_fp
 
 
-def _as_tensor(a) -> torch.Tensor:
-    return torch.as_tensor(np.asarray(a), dtype=torch.float32)
+def _as_matrix(X):
+    """Matrice creuse CSR ou tableau numpy float32 : les deux formes acceptées en entrée."""
+    return X.tocsr() if sp.issparse(X) else np.asarray(X, dtype=np.float32)
+
+
+def _dense(X, rows) -> torch.Tensor:
+    """Lignes rows (tableau d'indices ou slice) de X, en tenseur dense float32."""
+    part = X[rows]
+    if sp.issparse(part):
+        part = part.toarray()
+    return torch.as_tensor(np.asarray(part, dtype=np.float32))
+
+
+def _n_rows(X) -> int:
+    return X.shape[0]
 
 
 def _mean_loss(model, loss_fn, X, Y, batch_size) -> float:
     model.eval()
     total = 0.0
     with torch.no_grad():
-        for start in range(0, len(X), batch_size):
-            xb, yb = X[start : start + batch_size], Y[start : start + batch_size]
+        for start in range(0, _n_rows(X), batch_size):
+            rows = slice(start, start + batch_size)
+            xb, yb = _dense(X, rows), _dense(Y, rows)
             total += loss_fn(model(xb), yb).item() * len(xb)
-    return total / len(X)
+    return total / _n_rows(X)
 
 
 def train_mlp(X_train, Y_train, X_val=None, Y_val=None, config: TrainConfig | None = None, verbose: bool = True):
     """Entraîne un SpectrumToFingerprint ; renvoie (modèle, historique par époque).
 
+    X_train, X_val : matrices creuses scipy ou tableaux numpy (n, n_entrées) ;
+    Y_train, Y_val : fingerprints 0/1 (n, n_bits), par exemple en uint8.
+
     Avec un jeu de validation, l'entraînement s'arrête quand la loss de validation
     ne s'améliore plus pendant config.patience époques, et le modèle renvoyé est
-    celui de la meilleure époque.
+    celui de la meilleure époque. La loss d'entraînement est mesurée en mode
+    évaluation (sans dropout) sur config.train_monitor_size spectres tirés une fois
+    pour toutes, pour être comparable à la loss de validation sans tout reparcourir.
     """
     config = config or TrainConfig()
     torch.manual_seed(config.seed)
     torch.set_num_threads(config.n_threads)
+    rng = np.random.default_rng(config.seed)
 
-    X_train, Y_train = _as_tensor(X_train), _as_tensor(Y_train)
+    X_train, Y_train = _as_matrix(X_train), np.asarray(Y_train)
     has_val = X_val is not None
     if has_val:
-        X_val, Y_val = _as_tensor(X_val), _as_tensor(Y_val)
+        X_val, Y_val = _as_matrix(X_val), np.asarray(Y_val)
+
+    n_train = _n_rows(X_train)
+    monitor = np.sort(rng.choice(n_train, min(config.train_monitor_size, n_train), replace=False))
+    X_monitor, Y_monitor = X_train[monitor], Y_train[monitor]
 
     n_bits = Y_train.shape[1]
     model = SpectrumToFingerprint(X_train.shape[1], config.hidden, n_bits, config.dropout)
@@ -92,18 +126,18 @@ def train_mlp(X_train, Y_train, X_val=None, Y_val=None, config: TrainConfig | No
     for epoch in range(1, config.max_epochs + 1):
         t0 = time.perf_counter()
         model.train()
-        order = torch.randperm(len(X_train))  # mélange à chaque époque
-        for start in range(0, len(X_train), config.batch_size):
+        order = rng.permutation(n_train)  # mélange à chaque époque
+        for start in range(0, n_train, config.batch_size):
             idx = order[start : start + config.batch_size]
             optimizer.zero_grad()
-            loss = loss_fn(model(X_train[idx]), Y_train[idx])
+            loss = loss_fn(model(_dense(X_train, idx)), _dense(Y_train, idx))
             loss.backward()
             optimizer.step()
 
-        record = {"epoch": epoch, "train_loss": _mean_loss(model, loss_fn, X_train, Y_train, 4096)}
+        record = {"epoch": epoch, "train_loss": _mean_loss(model, loss_fn, X_monitor, Y_monitor, 4096)}
         if has_val:
             record["val_loss"] = _mean_loss(model, loss_fn, X_val, Y_val, 4096)
-            record["val_tanimoto"] = fingerprint_metrics(predict_proba(model, X_val), Y_val.numpy())["tanimoto"]
+            record["val_tanimoto"] = fingerprint_metrics(predict_proba(model, X_val), Y_val)["tanimoto"]
         record["seconds"] = time.perf_counter() - t0
         history.append(record)
         if verbose:
@@ -124,12 +158,51 @@ def train_mlp(X_train, Y_train, X_val=None, Y_val=None, config: TrainConfig | No
 
 
 def predict_proba(model: nn.Module, X, batch_size: int = 4096) -> np.ndarray:
-    """Probabilité de chaque bit, pour chaque ligne de X : tableau (n, n_bits) float32."""
-    X = _as_tensor(X)
+    """Probabilité de chaque bit, pour chaque ligne de X (creuse ou dense) : tableau (n, n_bits) float32."""
+    X = _as_matrix(X)
     model.eval()
     with torch.no_grad():
-        parts = [torch.sigmoid(model(X[start : start + batch_size])) for start in range(0, len(X), batch_size)]
-    return torch.cat(parts).numpy() if parts else np.zeros((0, 0), dtype=np.float32)
+        parts = [torch.sigmoid(model(_dense(X, slice(start, start + batch_size))))
+                 for start in range(0, _n_rows(X), batch_size)]
+    return torch.cat(parts).numpy() if parts else np.zeros((0, model.net[-1].out_features), dtype=np.float32)
+
+
+def spectra_inputs(spectra, encoder):
+    """Entrées du MLP pour des spectres bruts, construites comme load_matrices (A).
+
+    spectra : une ligne par spectre, avec les pics (ms2_mzs, ms2_normalized_intensities)
+    et les colonnes de métadonnées META_INPUT_COLUMNS ; encoder : encodeur de A
+    (load_encoder). Renvoie une matrice creuse CSR [spectre biné | métadonnées].
+    """
+    from casmi.features import bin_spectra, meta_features
+
+    X = bin_spectra(spectra["ms2_mzs"], spectra["ms2_normalized_intensities"])
+    meta = meta_features(spectra, encoder).to_numpy(dtype=np.float32)
+    return sp.hstack([X, sp.csr_matrix(meta)], format="csr")
+
+
+_default_model = {}
+
+
+def predict_fp(query_spectra, model: nn.Module | None = None, encoder=None) -> np.ndarray:
+    """Fingerprint prédit de chaque spectre : probabilités (n_spectres, n_bits) float32.
+
+    query_spectra : spectres bruts, comme pour spectra_inputs. Sans model, le modèle
+    est celui de MODEL_PATH (chargé une seule fois), avec l'encodeur de A
+    correspondant à l'encodage de l'adduct de son entraînement. Avec model, il faut
+    aussi donner son encodeur.
+    """
+    if model is None:
+        if "model" not in _default_model:
+            from casmi.matrices import load_encoder
+
+            _default_model["model"], config = load_model(MODEL_PATH)
+            _default_model["encoder"] = load_encoder(config.adduct_encoding)
+        model = _default_model["model"]
+        encoder = _default_model["encoder"] if encoder is None else encoder
+    elif encoder is None:
+        raise ValueError("Avec un modèle donné, il faut aussi son encodeur de métadonnées (load_encoder de A).")
+    return predict_proba(model, spectra_inputs(query_spectra, encoder))
 
 
 def fingerprint_metrics(probs: np.ndarray, Y_true: np.ndarray, threshold: float = 0.5) -> dict:

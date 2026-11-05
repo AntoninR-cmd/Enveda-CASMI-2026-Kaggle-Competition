@@ -195,6 +195,19 @@ Détails : `notebooks/A/07_matrices.ipynb`.
 
 PyTorch (version CPU) est installé dans le `.venv` de B pour le squelette `src/casmi/models/mlp.py`. Le README prévoyait de l'ajouter au sprint « modèle » : la ligne `torch` de `requirements.txt` peut être activée. Les tests du MLP sont ignorés automatiquement si PyTorch n'est pas installé.
 
+## Sprint 3
+
+### MLP spectre → fingerprint : premier modèle — proposée par B
+
+- **Entrées** : les matrices de A (`load_matrices`, adduct en *one-hot*), 10 031 colonnes. Elles restent creuses et ne passent en dense que par batch dans `train_mlp`.
+- **Split** : celui de A. Entraînement sur `train_sample` ; l'early stopping utilise 5 % de ses molécules (graine 42), et `dev` ne sert qu'à l'évaluation finale.
+- **Modèle** : l'architecture de départ du plan (2 couches cachées de 2 048, dropout 0,2), `BCEWithLogitsLoss` sans `pos_weight`, Adam 10⁻³, batchs de 1 024, patience de 3 époques. 20 époques en 50 min sur CPU, meilleure à la 17e. Poids dans `processed/models/mlp.pt`, hors git.
+- **Résultats sur `dev`** (évaluation provisoire, en attendant `evaluate` de C) : MRR@25 de **0,338** contre 0,222 pour la baseline 0 et 0,981 pour l'oracle. Tanimoto moyen du fingerprint prédit : 0,26.
+- **Pour C** : classer les candidats avec le **Tanimoto continu** sur les probabilités, Σpc / (Σp + Σc − Σpc), plutôt qu'après un seuil de 0,5 (MRR de 0,338 contre 0,256). Pour agréger les spectres d'une molécule, la moyenne des probabilités ne gagne presque rien par rapport à un seul spectre.
+- **Interface** : `predict_fp(query_spectra)` prend des spectres bruts (pics et métadonnées) et renvoie les probabilités `(n_spectres, 2048)`. Par défaut, elle charge `mlp.pt` et l'encodeur de A correspondant.
+
+Détails : `notebooks/B/04_mlp.ipynb`.
+
 ## Points à transmettre
 
 **À A (données et features) :**

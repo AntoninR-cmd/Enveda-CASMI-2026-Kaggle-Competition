@@ -1,15 +1,21 @@
 import numpy as np
+import pandas as pd
 import pytest
+import scipy.sparse as sp
 
 torch = pytest.importorskip("torch")
 
+from casmi.config import FP_SIZE  # noqa: E402
+from casmi.features import fit_meta_encoder, n_bins  # noqa: E402
 from casmi.models.mlp import (  # noqa: E402
     SpectrumToFingerprint,
     TrainConfig,
     fingerprint_metrics,
     load_model,
+    predict_fp,
     predict_proba,
     save_model,
+    spectra_inputs,
     train_mlp,
 )
 
@@ -79,3 +85,55 @@ def test_save_and_load(tmp_path):
 
     assert loaded_config == config
     np.testing.assert_allclose(predict_proba(loaded, X), predict_proba(model, X), rtol=1e-6)
+
+
+def test_sparse_inputs_give_the_same_model_as_dense():
+    # Les matrices de A sont creuses : l'entraînement doit donner exactement le même modèle
+    X, Y = random_data(n=80)
+    X[X < 0.8] = 0  # 80 % de zéros, comme un spectre biné
+    config = TrainConfig(hidden=32, max_epochs=3, batch_size=16, n_threads=1)
+    dense_model, dense_history = train_mlp(X, Y, X[:20], Y[:20], config=config, verbose=False)
+    sparse_model, sparse_history = train_mlp(sp.csr_matrix(X), Y.astype(np.uint8), sp.csr_matrix(X[:20]), Y[:20],
+                                             config=config, verbose=False)
+
+    assert [h["val_loss"] for h in sparse_history] == pytest.approx([h["val_loss"] for h in dense_history])
+    np.testing.assert_allclose(predict_proba(sparse_model, sp.csr_matrix(X)), predict_proba(dense_model, X), rtol=1e-5)
+
+
+def make_spectra(n=40, seed=0):
+    """Spectres bruts factices : pics et métadonnées, comme les lignes du train."""
+    rng = np.random.default_rng(seed)
+    positive = np.arange(n) % 3 != 0
+    ce = rng.choice([20.0, 40.0, 60.0], n)
+    n_peaks = rng.integers(3, 30, n)
+    return pd.DataFrame({
+        "adduct": np.where(positive, "[M+H]+", "[M-H]-"),
+        "ionization_mode": np.where(positive, "positive", "negative"),
+        "instrument_type": "timsTOF Pro",
+        "precursor_mz": rng.uniform(150, 600, n),
+        "collision_energy_ev": [[v] for v in ce],
+        "collision_energy_orig": [f"{v:g}" for v in ce],
+        "collision_energy_orig_units": "eV",
+        "ms2_mzs": [np.sort(rng.uniform(50, 600, k)) for k in n_peaks],
+        "ms2_normalized_intensities": [rng.uniform(0.01, 1, k) for k in n_peaks],
+    })
+
+
+def test_predict_fp_on_raw_spectra():
+    spectra = make_spectra()
+    encoder = fit_meta_encoder(spectra, min_adduct_count=10)
+    X = spectra_inputs(spectra, encoder)
+    assert sp.issparse(X)
+    assert X.shape[0] == len(spectra) and X.shape[1] > n_bins()  # spectre biné, puis métadonnées
+
+    model = SpectrumToFingerprint(n_inputs=X.shape[1], hidden=16)
+    probs = predict_fp(spectra, model=model, encoder=encoder)
+    assert probs.shape == (len(spectra), FP_SIZE)
+    assert probs.min() >= 0 and probs.max() <= 1
+    np.testing.assert_allclose(probs, predict_proba(model, X))
+
+
+def test_predict_fp_needs_the_encoder_of_a_given_model():
+    model = SpectrumToFingerprint(n_inputs=10, hidden=4)
+    with pytest.raises(ValueError):
+        predict_fp(make_spectra(n=3), model=model)

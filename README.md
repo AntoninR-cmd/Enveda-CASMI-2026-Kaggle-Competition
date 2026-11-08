@@ -11,6 +11,7 @@ git clone git@github.com:AntoninR-cmd/projet_ml.git
 cd projet_ml
 python3 -m venv .venv
 source .venv/bin/activate        # Windows : .venv\Scripts\activate
+pip install torch --index-url https://download.pytorch.org/whl/cpu   # version CPU, sans carte NVIDIA
 pip install -r requirements.txt
 pip install -e .
 nbstripout --install             # retire les sorties des notebooks à chaque commit
@@ -18,7 +19,7 @@ nbstripout --install             # retire les sorties des notebooks à chaque co
 
 Dans VS Code ou Jupyter, sélectionnez ensuite l'interpréteur / le noyau `.venv`.
 
-> `torch` n'est pas dans `requirements.txt` : sa version dépend de la machine (CPU, GPU NVIDIA, Mac). Les instructions seront ajoutées au sprint « modèle ».
+> Sans la ligne `pip install torch`, pip téléchargerait sous Linux la version pour carte NVIDIA, de plusieurs Go. Avec une carte NVIDIA, remplacez cette ligne par la commande donnée sur [pytorch.org](https://pytorch.org/get-started/locally/).
 
 ## Données
 

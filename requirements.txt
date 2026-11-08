@@ -10,7 +10,7 @@ rdkit==2026.9.1         # épinglé : les fingerprints doivent être identiques 
 
 # --- Machine learning ---
 scikit-learn>=1.9
-# torch                 # à activer au sprint modèle (version CPU/GPU selon la machine)
+torch>=2.15             # version CPU ou GPU à installer avant ce fichier : voir le README
 
 # --- Visualisation ---
 matplotlib>=3.11

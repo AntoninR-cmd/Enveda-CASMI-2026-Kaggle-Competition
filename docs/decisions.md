@@ -191,9 +191,9 @@ Détails : `notebooks/A/06_meta_features.ipynb`.
 
 Détails : `notebooks/A/07_matrices.ipynb`.
 
-### PyTorch — à discuter
+### PyTorch : ajouté à `requirements.txt` — proposée par A
 
-PyTorch (version CPU) est installé dans le `.venv` de B pour le squelette `src/casmi/models/mlp.py`. Le README prévoyait de l'ajouter au sprint « modèle » : la ligne `torch` de `requirements.txt` peut être activée. Les tests du MLP sont ignorés automatiquement si PyTorch n'est pas installé.
+`torch>=2.15` est activé dans `requirements.txt`, car le MLP (`src/casmi/models/mlp.py`) et le futur `make_loader` en ont besoin. Le README indique d'installer d'abord la version CPU, ou la version adaptée pour une carte NVIDIA. Les tests du MLP sont ignorés automatiquement si PyTorch n'est pas installé.
 
 ## Points à transmettre
 

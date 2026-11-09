@@ -1,0 +1,2 @@
+date,auteur,methode,params,split,n_queries,n_train_spectra,ppm,k_neighbors,mrr_at_25,recall_at_1,recall_at_5,recall_at_25
+2026-11-09,Inès,KNN + fingerprint Morgan + Tanimoto,train_size=10000;k_neighbors=10;ppm=10,dev,2000,10000,10,10,0.24230898886627295,0.144,0.3455,0.6395

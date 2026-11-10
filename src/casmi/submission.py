@@ -155,7 +155,12 @@ def build_submission(
 
 def main():
     """Génère submission.csv à la racine du projet."""
-    submission = build_submission()
+    submission = build_submission(
+    train_size=30000,
+    k_neighbors=5,
+    ppm=5,
+    random_state=42
+)
     submission.to_csv("submission.csv", index=False)
 
     print("Soumission générée : submission.csv")
